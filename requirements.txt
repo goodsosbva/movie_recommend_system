@@ -1,0 +1,7 @@
+kiwipiepy
+python-dotenv
+rank-bm25
+requests
+sentence-transformers
+scikit-learn
+streamlit

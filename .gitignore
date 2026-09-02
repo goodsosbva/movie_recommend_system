@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+data/movies.json
+data/curated_movies.json
+data/embeddings.npy
+data/embedding_ids.json
+data/metadata_embeddings.npy
+data/metadata_embedding_ids.json
+data/kobis_catalog.json
