@@ -10,7 +10,7 @@ pip install -r requirements.txt
 python -m unittest test_recommender    # 테스트
 python build_dataset.py                # 데이터 재생성 (형태소 분석이라 몇 분 걸림)
 streamlit run app.py                   # 앱
-python recommend.py --title 친구 --only-plot
+python recommend.py --title 친구
 ```
 
 ## 구조
@@ -28,8 +28,8 @@ python recommend.py --title 친구 --only-plot
 
 - **줄거리는 27,852편 중 602편에만 있다.** OMDb를 영문 제목으로 조회해 얻은
   것을 한국어로 옮긴 결과다. 나머지는 `overview`가 빈 문자열이며 장르·제작국·
-  감독만으로 비교된다. 이 상태에서 전체를 대상으로 추천하면 줄거리 효과가
-  거의 드러나지 않으므로, 확인할 때는 `--only-plot`을 쓰는 편이 낫다.
+  감독만으로 비교된다. **후보군을 나누지 않는다.** 인덱스는 언제나 카탈로그
+  전체 27,852편으로 한 번 짓는다.
 - `data/overview_ko.json`은 손으로 다듬은 번역이라 저장소에 함께 둔다. 나머지
   `data/*.json`은 생성물이므로 gitignore 대상이다.
 - KMDb 줄거리가 생기면 `data/overview_ko_kmdb.json`으로 저장하고

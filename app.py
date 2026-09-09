@@ -1,4 +1,8 @@
-"""BM25로 비슷한 영화를 추천하는 화면."""
+"""BM25로 비슷한 영화를 추천하는 화면.
+
+카탈로그 전체를 하나의 후보군으로 쓴다. 줄거리가 있으면 문서에 들어가고
+없으면 장르·제작국·감독만으로 문서가 만들어진다. 나누어 계산하지 않는다.
+"""
 from __future__ import annotations
 
 import json
@@ -16,16 +20,16 @@ TOKENS_PATH = Path("data/tokens.json")
 def load_data() -> tuple[list[dict], list[list[str]]]:
     movies = json.loads(MOVIES_PATH.read_text(encoding="utf-8"))
     tokens = json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
+    if len(movies) != len(tokens):
+        raise ValueError("movies.json과 tokens.json의 길이가 다릅니다. build_dataset.py를 다시 실행하십시오.")
     return movies, tokens
 
 
 @st.cache_resource(show_spinner="BM25 인덱스를 만드는 중입니다...")
-def load_index(only_plot: bool):
-    """줄거리 보유작만 볼지에 따라 서로 다른 인덱스를 만들어 캐시한다."""
-    movies, tokens = load_data()
-    keep = [i for i, movie in enumerate(movies) if movie.get("overview")] if only_plot else list(range(len(movies)))
-    movies, tokens = [movies[i] for i in keep], [tokens[i] for i in keep]
-    return build_index(tokens), tokens, movies
+def load_index():
+    """카탈로그 전체로 인덱스를 한 번 짓는다."""
+    _, tokens = load_data()
+    return build_index(tokens)
 
 
 def main() -> None:
@@ -37,24 +41,22 @@ def main() -> None:
         st.code("python build_dataset.py", language="bash")
         return
 
-    all_movies, _ = load_data()
-    with_plot = sum(1 for movie in all_movies if movie.get("overview"))
+    movies, tokens = load_data()
+    index = load_index()
+    with_plot = sum(1 for movie in movies if movie.get("overview"))
     with st.sidebar:
         st.header("설정")
-        only_plot = st.toggle("줄거리 있는 작품끼리만 비교", value=True,
-                              help=f"현재 줄거리를 확보한 작품은 {with_plot:,}편입니다.")
         limit = st.slider("추천 편수", 3, 20, 10)
-        st.caption(f"전체 {len(all_movies):,}편 · 줄거리 보유 {with_plot:,}편")
-        st.caption("장르·제작국·감독·줄거리를 형태소로 쪼갠 뒤 BM25 점수로 순위를 매깁니다.")
+        st.caption(f"후보 {len(movies):,}편 (줄거리 보유 {with_plot:,}편)")
+        st.caption("장르·제작국·감독에 줄거리가 있으면 덧붙여 형태소로 쪼갠 뒤 BM25로 순위를 매깁니다.")
 
-    index, tokens, movies = load_index(only_plot)
-    st.write(f"현재 **{len(movies):,}편** 중에서 추천합니다.")
+    st.write(f"**{len(movies):,}편** 전체에서 추천합니다. 줄거리가 있는 작품은 줄거리까지 함께 비교합니다.")
 
     query = st.text_input("본 영화 제목", max_chars=100, placeholder="예: 친구")
     keyword = query.strip().casefold()
-    matches = [movie for movie in movies if keyword and keyword in movie["title"].casefold()][:50] if keyword else []
+    matches = [movie for movie in movies if keyword in movie["title"].casefold()][:50] if keyword else []
     if keyword and not matches:
-        st.info("제목이 일치하는 작품이 없습니다. 줄거리 필터를 꺼 보십시오.")
+        st.info("제목이 일치하는 작품이 없습니다.")
         return
     if not matches:
         return
@@ -62,7 +64,9 @@ def main() -> None:
     chosen = st.selectbox(
         "정확한 영화를 선택하십시오.",
         matches,
-        format_func=lambda movie: f"{movie['title']} ({movie['year'] or '연도 미상'}) · {', '.join(movie.get('genres', [])) or '장르 미상'}",
+        format_func=lambda movie: f"{movie['title']} ({movie['year'] or '연도 미상'}) · "
+                                  f"{', '.join(movie.get('genres', [])) or '장르 미상'}"
+                                  f"{' · 줄거리 있음' if movie.get('overview') else ''}",
     )
     if st.button("이 영화를 봤어요", type="primary"):
         st.session_state["selected_id"] = chosen["id"]
@@ -72,14 +76,19 @@ def main() -> None:
         return
     position = next((i for i, movie in enumerate(movies) if movie["id"] == selected_id), None)
     if position is None:
-        st.warning("선택한 영화가 지금 필터에 걸려 목록에 없습니다. 다시 골라 주십시오.")
+        st.warning("선택한 영화를 찾지 못했습니다. 다시 골라 주십시오.")
         return
 
     base = movies[position]
     st.divider()
     st.subheader(f"{base['title']}을(를) 본 뒤 추천하는 작품")
     st.caption(base.get("overview") or "이 영화에는 줄거리 정보가 없어 장르·제작국·감독으로만 비교합니다.")
-    for item in recommend(index, tokens, movies, position, limit):
+    try:
+        results = recommend(index, tokens, movies, position, limit)
+    except ValueError as error:
+        st.warning(str(error))
+        return
+    for item in results:
         movie = item["movie"]
         st.markdown(f"**{movie['title']}** ({movie['year'] or '연도 미상'})")
         st.caption(" · ".join(filter(None, (

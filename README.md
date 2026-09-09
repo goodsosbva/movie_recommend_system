@@ -48,13 +48,12 @@ python build_dataset.py                           # 합치고 형태소 토큰�
 ## 쓰기
 
 ```bash
-streamlit run app.py                       # 화면
-python recommend.py --title 친구 --only-plot  # 터미널
+streamlit run app.py                  # 화면
+python recommend.py --title 친구        # 터미널
 ```
 
-`--only-plot`(화면에서는 "줄거리 있는 작품끼리만 비교")을 켜면 줄거리가 있는
-602편 안에서만 비교한다. 끄면 27,852편 전체가 대상이 되지만, 줄거리가 없는
-영화는 장르·제작국·감독만으로 비교된다.
+후보군은 언제나 카탈로그 **전체 27,852편**이다. 줄거리가 있는 작품은 줄거리까지
+함께 비교되고, 없는 작품은 장르·제작국·감독만으로 비교된다. 나누어 계산하지 않는다.
 
 ## KMDb 줄거리를 붙일 때
 

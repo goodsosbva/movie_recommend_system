@@ -1,7 +1,7 @@
 """터미널에서 추천을 확인한다.
 
 python recommend.py --title 친구
-python recommend.py --title 반지의 제왕 --limit 5 --only-plot
+python recommend.py --title 기생충 --limit 5
 """
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ def find(movies: list[dict], title: str) -> int:
     if not matches:
         raise SystemExit(f"오류: '{title}'과(와) 일치하는 영화가 없습니다.")
     if len(matches) > 1:
-        print(f"{len(matches)}편이 일치하여 첫 번째를 씁니다: {movies[matches[0]]['title']} ({movies[matches[0]]['year']})")
+        first = movies[matches[0]]
+        print(f"{len(matches)}편이 일치하여 첫 번째를 씁니다: {first['title']} ({first['year']})")
     return matches[0]
 
 
@@ -29,19 +30,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="BM25 유사 영화 추천")
     parser.add_argument("--title", required=True)
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--only-plot", action="store_true", help="줄거리가 있는 영화끼리만 비교한다.")
     args = parser.parse_args()
     if not MOVIES_PATH.exists() or not TOKENS_PATH.exists():
         raise SystemExit("오류: data/movies.json 또는 data/tokens.json이 없습니다. python build_dataset.py를 먼저 실행하십시오.")
 
     movies = json.loads(MOVIES_PATH.read_text(encoding="utf-8"))
     tokens = json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
-    if args.only_plot:
-        keep = [i for i, movie in enumerate(movies) if movie.get("overview")]
-        movies, tokens = [movies[i] for i in keep], [tokens[i] for i in keep]
-
     selected = find(movies, args.title)
     index = build_index(tokens)
+
     base = movies[selected]
     print(f"\n기준: {base['title']} ({base['year']}) · {', '.join(base.get('genres', [])) or '장르 미상'}")
     print(f"줄거리: {base.get('overview') or '(없음)'}\n")
