@@ -1,5 +1,8 @@
-"""Kiwi 형태소 분석과 BM25 기반 영화 추천."""
+"""Kiwi 형태소 분석과 BM25 유사도로 비슷한 영화를 찾는다.
 
+문서 한 편 = 장르 + 제작국 + 감독 + (있으면) 한국어 줄거리.
+추천은 "고른 영화의 문서를 그대로 검색어로 삼아 나머지를 순위 매기기"다.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -7,76 +10,70 @@ from typing import Any
 from kiwipiepy import Kiwi
 from rank_bm25 import BM25Okapi
 
-
+# 명사·외국어·수사·동사·형용사·어근만 남긴다. 조사와 어미는 검색에 방해가 된다.
 CONTENT_TAGS = {"NNG", "NNP", "SL", "SH", "SN", "VV", "VA", "XR"}
-WEIGHTS = {"bm25": 0.55, "genre": 0.25, "keyword": 0.15, "people": 0.05}
 _kiwi = Kiwi(num_workers=0)
 
 
 def tokenize(text: str) -> list[str]:
-    """추천에 의미 있는 한국어 형태소만 남긴다."""
+    """한국어 문장에서 검색에 쓸 형태소만 뽑는다."""
     if not text:
         return []
     return [token.form for token in _kiwi.tokenize(text) if token.tag in CONTENT_TAGS]
 
 
-def build_bm25(movies: list[dict[str, Any]]) -> BM25Okapi:
-    corpus = [movie["tokens"] for movie in movies]
-    if not corpus or not any(corpus):
-        raise ValueError("BM25 인덱스를 만들 수 있는 줄거리 토큰이 없습니다.")
-    return BM25Okapi(corpus, k1=1.5, b=0.75)
+def document(movie: dict[str, Any]) -> str:
+    """영화 한 편을 BM25에 넣을 한 덩어리 텍스트로 만든다."""
+    parts = [
+        " ".join(movie.get("genres", [])),
+        movie.get("nation", ""),
+        " ".join(movie.get("directors", [])),
+        str(movie.get("overview", "")).strip(),
+    ]
+    return "\n".join(part for part in parts if part)
 
 
-def jaccard(left: list[Any], right: list[Any]) -> float:
-    left_set, right_set = set(left), set(right)
-    union = left_set | right_set
-    return len(left_set & right_set) / len(union) if union else 0.0
+def build_tokens(movies: list[dict[str, Any]]) -> list[list[str]]:
+    """전체 카탈로그를 토큰 목록으로 바꾼다. 오래 걸리므로 한 번만 하고 저장한다."""
+    return [tokenize(document(movie)) for movie in movies]
 
 
-def people_score(selected: dict[str, Any], candidate: dict[str, Any]) -> float:
-    same_director = selected.get("director_id") == candidate.get("director_id") and bool(selected.get("director_id"))
-    return 0.7 * float(same_director) + 0.3 * jaccard(selected["cast_ids"], candidate["cast_ids"])
+def build_index(tokens: list[list[str]]) -> BM25Okapi:
+    if not any(tokens):
+        raise ValueError("BM25 인덱스를 만들 토큰이 없습니다. build_dataset.py를 먼저 실행하십시오.")
+    return BM25Okapi(tokens, k1=1.5, b=0.75)
 
 
-def normalize(scores: list[float]) -> list[float]:
-    maximum = max(scores, default=0.0)
-    return [max(score, 0.0) / maximum if maximum > 0 else 0.0 for score in scores]
+def common_terms(query: list[str], document_tokens: list[str], limit: int = 6) -> list[str]:
+    """왜 추천됐는지 보여줄 공통 낱말. 질의에 나온 순서를 지킨다."""
+    shared = set(document_tokens)
+    seen: list[str] = []
+    for term in query:
+        if term in shared and term not in seen:
+            seen.append(term)
+    return seen[:limit]
 
 
-def reasons(scores: dict[str, float]) -> list[str]:
-    result: list[str] = []
-    if scores["genre"] >= 0.5:
-        result.append("장르가 비슷합니다.")
-    if scores["keyword"] >= 0.2:
-        result.append("핵심 소재와 키워드가 겹칩니다.")
-    if scores["bm25"] >= 0.45:
-        result.append("줄거리의 주요 주제가 비슷합니다.")
-    if scores["people"] >= 0.7:
-        result.append("같은 감독이 참여했습니다.")
-    return result or ["줄거리와 영화 정보의 관련도를 종합했습니다."]
-
-
-def recommend(selected: dict[str, Any], movies: list[dict[str, Any]], bm25: BM25Okapi, limit: int = 10, candidate_limit: int = 100) -> list[dict[str, Any]]:
-    """선택 영화를 검색 질의로 삼아 후보를 재정렬한다."""
-    if limit < 1 or candidate_limit < limit:
-        raise ValueError("추천 개수 설정이 올바르지 않습니다.")
-    query = list(dict.fromkeys(selected.get("tokens") or tokenize(selected.get("overview", ""))))
+def recommend(index: BM25Okapi, tokens: list[list[str]], movies: list[dict[str, Any]], selected: int, limit: int = 10) -> list[dict[str, Any]]:
+    """고른 영화와 비슷한 순으로 돌려준다. 자기 자신은 뺀다."""
+    if not 0 <= selected < len(movies):
+        raise ValueError("선택한 영화의 위치가 카탈로그 범위를 벗어났습니다.")
+    if len(tokens) != len(movies):
+        raise ValueError("영화 목록과 토큰 목록의 길이가 다릅니다. build_dataset.py를 다시 실행하십시오.")
+    if limit < 1:
+        raise ValueError("추천 편수는 1 이상이어야 합니다.")
+    query = tokens[selected]
     if not query:
-        raise ValueError("선택한 영화에 추천 가능한 줄거리 정보가 없습니다.")
-    raw_scores = list(bm25.get_scores(query))
-    normalized = normalize(raw_scores)
-    candidates = sorted(range(len(movies)), key=raw_scores.__getitem__, reverse=True)[:candidate_limit]
-    ranked: list[dict[str, Any]] = []
-    for index in candidates:
-        movie = movies[index]
-        if movie["id"] == selected["id"]:
-            continue
-        scores = {
-            "bm25": normalized[index],
-            "genre": jaccard(selected["genre_ids"], movie["genre_ids"]),
-            "keyword": jaccard(selected["keyword_ids"], movie["keyword_ids"]),
-            "people": people_score(selected, movie),
+        raise ValueError("선택한 영화에는 검색에 쓸 정보가 없습니다.")
+    scores = index.get_scores(query)
+    ranked = sorted((i for i in range(len(movies)) if i != selected), key=scores.__getitem__, reverse=True)[:limit]
+    best = float(scores[ranked[0]]) if ranked else 0.0
+    return [
+        {
+            "movie": movies[i],
+            "score": float(scores[i]),
+            "ratio": float(scores[i]) / best if best > 0 else 0.0,
+            "terms": common_terms(query, tokens[i]),
         }
-        ranked.append({"movie": movie, "score": sum(scores[name] * WEIGHTS[name] for name in WEIGHTS), "reasons": reasons(scores)})
-    ranked.sort(key=lambda item: (item["score"], item["movie"]["title"]), reverse=True)
-    return ranked[:limit]
+        for i in ranked
+    ]

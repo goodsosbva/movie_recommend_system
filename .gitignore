@@ -2,10 +2,11 @@
 .venv/
 __pycache__/
 .pytest_cache/
-data/movies.json
-data/curated_movies.json
-data/embeddings.npy
-data/embedding_ids.json
-data/metadata_embeddings.npy
-data/metadata_embedding_ids.json
+
+# 생성물. build_kobis_catalog.py / build_omdb_overviews.py / build_dataset.py로 다시 만든다.
 data/kobis_catalog.json
+data/omdb_overview_cache.json
+data/movies.json
+data/tokens.json
+
+# data/overview_ko.json은 손으로 다듬은 번역 결과라 저장소에 함께 둔다.
